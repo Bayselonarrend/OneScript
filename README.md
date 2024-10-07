@@ -21,7 +21,7 @@
 + **Пакетный менеджер и библиотека полезных скриптов** <br>
 В поставку OneScript уже входит набор наиболее часто используемых пакетов. Эти, а также другие пакеты находятся в репозитории [oscript-library](https://github.com/oscript-library) и доступны всем желающим. Имеется пакетный менеджер [opm](https://github.com/oscript-library/opm)
 
-+ **Канал Telegram**
++ **Канал Telegram** <br>
 Помощь по работе с OneScript, а также ответы на интересующие вас вопросы вы можете найти в телеграм канале сообщества OneScript - [@oscript_library](https://t.me/oscript_library)
 
 ## Установка ##
@@ -47,22 +47,22 @@
 
 #### Донастройка Self-Contained варианта поставки (не требующего инсталляции dotnet)
 
-```
+```bash
 chmod +x ./oscript
 xattr -d com.apple.quarantine *.dylib oscript
 codesign -s - ./oscript
 ```
 
 
-# Ручная локальная сборка
+## Ручная локальная сборка
 
-## Подготовка
+### Подготовка
 
 Ниже приведены ссылки на дистрибутивы, однако, учтите, что ссылки могут меняться со временем и их актуальность не гарантируется. Нужен dotnet SDK и компилятор C++, скачать можно из любого места, которое нагуглится.
 
 * Установить [MS BuildTools](https://visualstudio.microsoft.com/ru/thank-you-downloading-visual-studio/?sku=buildtools&rel=16), при установке включить таргетинг на .net6, .net4.8, установить компилятор C++.
 
-## Сборка
+### Сборка
 
 Запустить Developer Command Prompt (появится в меню Пуск после установки MSBuildTools или Visual Studio). Перейти в каталог репозитория OneScript. Далее приведены команды в консоли Developer Command Prompt
 Сборка выполняется с помощью msbuild. Таргеты:
@@ -82,20 +82,32 @@ codesign -s - ./oscript
 
 Все поставляемые файлы будут размещены в каталоге `built` в корне репозитория 1Script
 
-### Сборка содержимого дистрибутивов в отдельном каталоге
+#### Сборка содержимого дистрибутивов в отдельном каталоге
 
-```bat
+```powershell
 msbuild Build.csproj /t:CleanAll;PrepareDistributionFiles
 ```
 
-### Сборка с ручным указанием версии
+#### Сборка с ручным указанием версии
 
-```bat
+```powershell
 msbuild Build.csproj /t:CleanAll;PrepareDistributionFiles /p:VersionPrefix=2.0.0
 ```
 
-### Сборка ZIP-дистрибутивов
+#### Сборка ZIP-дистрибутивов
 
-```bat
+```powershell
 msbuild Build.csproj /t:CleanAll;PrepareDistributionFiles;PackDistributions /p:VersionPrefix=2.0.0 /p:VersionSuffix=preview223
 ```
+
+## Контрибьюторы
+Список клюдей, принимающих участие в развитии проекта
+
+<a href="https://github.com/EvilBeaver/OneScript/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=EvilBeaver/OneScript" align=left/>
+</a>
+
+<img src="https://github.com/Bayselonarrend/OneScript/blob/develop/.github/pic3.png?raw=true" align=right width=256>
+
+> OneScript by Andrei Ovsiankin <br>
+> Licensed under the MPL-2.0 license
