@@ -1,30 +1,28 @@
-# OneScript #
 
-[![Join telegram chat](https://img.shields.io/badge/chat-telegram-blue?style=flat&logo=telegram)](https://t.me/oscript_library) [![DEV Build Status](https://build.oscript.io/buildStatus/icon?job=1Script%2Fdevelop&style=flat-square&subject=dev)](https://build.oscript.io/job/1Script/job/develop/) [![STABLE Build Status](https://build.oscript.io/buildStatus/icon?job=1Script%2Fmaster&style=flat-square&subject=stable)](https://build.oscript.io/job/1Script/job/master/)
+![Cover](https://github.com/Bayselonarrend/OneScript/blob/develop/.github/cover_shadow.png?raw=true)
+# OneScript 
 
-## Проект является независимой кросс-платформенной реализацией виртуальной машины, исполняющей скрипты на языке 1С:Предприятие ##
+[![Join telegram chat](https://img.shields.io/badge/chat-telegram-blue?style=flat-square&logo=telegram)](https://t.me/oscript_library) [![DEV Build Status](https://build.oscript.io/buildStatus/icon?job=1Script%2Fdevelop&style=flat-square&subject=dev)](https://build.oscript.io/job/1Script/job/develop/) [![STABLE Build Status](https://build.oscript.io/buildStatus/icon?job=1Script%2Fmaster&style=flat-square&subject=stable)](https://build.oscript.io/job/1Script/job/master/)
 
-![Logo](.github/logo-small.png)
+Инструмент автоматизации, позволяющий создавать и выполнять текстовые сценарии, написанные на языке 1С:Предприятие. Применение знакомого языка для скриптовой автоматизации позволяет значительно повысить продуктивность специалиста за счет более простой автоматизации ручных операций.
 
-При этом библиотеки системы 1С:Предприятие не используются и не требуется установка системы 1С:Предприятие на целевой машине.
+## О проекте
 
+Проект является независимой кросс-платформенной реализацией виртуальной машины, исполняющей скрипты на языке 1С:Предприятие. При этом библиотеки системы 1С:Предприятие не используются и не требуется установка системы 1С:Предприятие на целевой машине.
 Иными словами, это инструмент для написания и выполнения программ на языке 1С без использования платформы 1С:Предприятие.
 
-## Название и произношение ##
+## Ресурсы ##
 
-Проект носит название OneScript, может быть сокращен при написании до названия 1Script. Произносится как `[уанскрипт]`.
+<img src="https://github.com/Bayselonarrend/OneScript/blob/develop/.github/pic2.png?raw=true" align=right width=256>
 
-OneScript позволяет создавать и выполнять текстовые сценарии, написанные на языке, знакомом любому специалисту по системе 1С:Предприятие. Применение знакомого языка для скриптовой автоматизации позволяет значительно повысить продуктивность специалиста за счет более простой автоматизации ручных операций.
++ **Сайт проекта** <br>
+Основная информация о проекте, релизы и техдокументация расположены на официальном сайте [oscript.io](https://oscript.io)
 
-## Сайт проекта ##
++ **Пакетный менеджер и библиотека полезных скриптов** <br>
+В поставку OneScript уже входит набор наиболее часто используемых пакетов. Эти, а также другие пакеты находятся в репозитории [oscript-library](https://github.com/oscript-library) и доступны всем желающим. Имеется пакетный менеджер [opm](https://github.com/oscript-library/opm)
 
-Основная информация о проекте, релизы и техдокументация расположены на официальном сайте
-
-[https://oscript.io](https://oscript.io)
-
-## Библиотека полезных скриптов ##
-
-В поставку OneScript уже входит набор наиболее часто используемых пакетов. Эти, а также другие пакеты находятся в репозитории [oscript-library](https://github.com/oscript-library) и доступны всем желающим. Имеется пакетный менеджер [opm](https://github.com/oscript-library/opm).
++ **Канал Telegram**
+Помощь по работе с OneScript, а также ответы на интересующие вас вопросы вы можете найти в телеграм канале сообщества OneScript - [@oscript_library](https://t.me/oscript_library)
 
 ## Установка ##
 
