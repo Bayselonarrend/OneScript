@@ -1,5 +1,6 @@
+![cover_shadow](https://github.com/user-attachments/assets/f98102f5-4d6c-4825-8389-edf6a84df4ba)
 
-![Cover](https://github.com/Bayselonarrend/OneScript/blob/develop/.github/cover_shadow.png?raw=true)
+
 # OneScript 
 
 [![Join telegram chat](https://img.shields.io/badge/chat-telegram-blue?style=flat-square&logo=telegram)](https://t.me/oscript_library) [![DEV Build Status](https://build.oscript.io/buildStatus/icon?job=1Script%2Fdevelop&style=flat-square&subject=dev)](https://build.oscript.io/job/1Script/job/develop/) [![STABLE Build Status](https://build.oscript.io/buildStatus/icon?job=1Script%2Fmaster&style=flat-square&subject=stable)](https://build.oscript.io/job/1Script/job/master/)
