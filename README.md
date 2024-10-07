@@ -1,4 +1,4 @@
-![cover_shadow](https://github.com/user-attachments/assets/f98102f5-4d6c-4825-8389-edf6a84df4ba)
+![cover_shadow](https://github.com/Bayselonarrend/OneScript/blob/develop/.github/cover_shadow.png?raw=true)
 
 
 # OneScript 
