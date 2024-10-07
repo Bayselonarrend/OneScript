@@ -14,7 +14,7 @@
 
 ## Ресурсы ##
 
-<img src="https://github.com/Bayselonarrend/OneScript/blob/develop/.github/pic2.png?raw=true" align=right width=270>
+<img src="https://github.com/Bayselonarrend/OneScript/blob/develop/.github/pic2.png?raw=true" align=right width=290>
 
 + **Сайт проекта** <br>
 Основная информация о проекте, релизы и техдокументация расположены на официальном сайте [oscript.io](https://oscript.io)
