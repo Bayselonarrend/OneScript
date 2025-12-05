@@ -94,7 +94,7 @@ namespace VSCode.DebugAdapter
             _process.Exited += Process_Exited;
             _attachMode = false;
             _process.Start();
-            System.Threading.Thread.Sleep(1500);
+            System.Threading.Thread.Sleep(2500);
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
         }
