@@ -41,9 +41,15 @@ namespace OneScript.StandardLibrary
         /// </summary>
         [ContextProperty("ВерсияОС", "OSVersion")]
         public string OSVersion => Environment.OSVersion.VersionString;
+        
+        /// <summary>
+        /// Полная командная строка выполняемого приложения, включая исполняемый файл и все аргументы командной строки.
+        /// </summary>
+        [ContextProperty("ПолнаяКоманднаяСтрока", "FullCommandLine")]
+        public string FullCommandLine => Environment.CommandLine;
 
         /// <summary>
-        /// Имя ядра ОС/
+        /// Имя ядра ОС
         /// </summary>
         [ContextProperty("ИмяЯдра", "KernelName")]
         public string KernelName => _osKernelName; // позволит различать linux/mac/hp-ux/sunos/...
@@ -172,8 +178,8 @@ namespace OneScript.StandardLibrary
         {
             get
             {
-                var arr = new ArrayImpl();
                 var data = Environment.GetLogicalDrives();
+                var arr = new ArrayImpl(data.Length);
                 foreach (var itm in data)
                 {
                     arr.Add(ValueFactory.Create(itm));

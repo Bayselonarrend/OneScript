@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 This Source Code Form is subject to the terms of the 
 Mozilla Public License, v.2.0. If a copy of the MPL 
 was not distributed with this file, You can obtain one 
@@ -21,19 +21,34 @@ namespace OneScript.StandardLibrary.Collections.Indexes
         private readonly List<IValue> _fields = new List<IValue>();
         private readonly IIndexCollectionSource _source;
 
-        private readonly IDictionary<CollectionIndexKey, IList<IValue>> _data =
-            new Dictionary<CollectionIndexKey, IList<IValue>>();
+        private readonly Dictionary<CollectionIndexKey, HashSet<IValue>> _data =
+            new Dictionary<CollectionIndexKey, HashSet<IValue>>();
         
         public CollectionIndex(IIndexCollectionSource source, IEnumerable<IValue> fields)
         {
+            foreach (var field in fields)
+            {
+                if (field is ValueTable.ValueTableColumn column) 
+                    column.AddToIndex();
+                _fields.Add(field);
+            }
+        
             _source = source;
-            _fields.AddRange(fields);
+            foreach (var value in _source)
+            {
+                ElementAdded(value);
+            }
         }
 
         internal bool CanBeUsedFor(IEnumerable<IValue> searchFields)
         {
-            return _fields.Any() && _fields.ToHashSet().IsSubsetOf(searchFields.ToHashSet());
+            return _fields.Count != 0 && _fields.All(f => searchFields.Contains(f));
         }
+
+        /// <summary>
+        /// Поля, входящие в индекс (в порядке объявления индекса).
+        /// </summary>
+        internal IReadOnlyList<IValue> GetIndexedFields() => _fields;
 
         private CollectionIndexKey IndexKey(PropertyNameIndexAccessor source)
         {
@@ -48,44 +63,56 @@ namespace OneScript.StandardLibrary.Collections.Indexes
         public IEnumerable<IValue> GetData(PropertyNameIndexAccessor searchCriteria)
         {
             var key = IndexKey(searchCriteria);
-            return _data.TryGetValue(key, out var filteredData) ? filteredData : new List<IValue>();
+            return _data.TryGetValue(key, out var filteredData) ? filteredData : Enumerable.Empty<IValue>();
         }
 
         internal void FieldRemoved(IValue field)
         {
             if (_fields.Contains(field))
             {
-                while (_fields.Contains(field)) _fields.Remove(field);
+                while (_fields.Contains(field))
+                {
+                    if (field is ValueTable.ValueTableColumn column)
+                        column.DeleteFromIndex();
+
+                    _fields.Remove(field);
+                }
                 Rebuild();
+            }
+        }
+
+        internal void ExcludeFields()
+        {
+            foreach (var field in _fields)
+            {
+                if (field is ValueTable.ValueTableColumn column)
+                    column.DeleteFromIndex();
             }
         }
 
         internal void ElementAdded(PropertyNameIndexAccessor element)
         {
             var key = CollectionIndexKey.Extract(element, _fields);
-            if (_data.TryGetValue(key, out var list))
+            if (_data.TryGetValue(key, out var set))
             {
-                list.Add(element);
+                set.Add(element);
             }
             else
             {
-                _data.Add(key, new List<IValue> { element});
+                _data.Add(key, new HashSet<IValue> { element });
             }
         }
 
         internal void ElementRemoved(PropertyNameIndexAccessor element)
         {
             var key = CollectionIndexKey.Extract(element, _fields);
-            if (_data.TryGetValue(key, out var value))
+            if (_data.TryGetValue(key, out var set))
             {
-                value.Remove(element);
+                set.Remove(element);
             }
         }
 
-        internal void Clear()
-        {
-            _data.Clear();
-        }
+        internal void Clear() => _data.Clear();
 
         internal void Rebuild()
         {

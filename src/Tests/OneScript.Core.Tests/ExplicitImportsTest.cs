@@ -82,19 +82,26 @@ namespace OneScript.Core.Tests
         }
 
         [Fact]
-        public void ExplicitImports_Development_WithDebugger_CompilationError()
+        public void ExplicitImports_Development_WithDebugger_HasWarning()
         {
+            var debugSessionMock = new Mock<IDebugSession>();
+            debugSessionMock.Setup(x => x.IsActive).Returns(false);
+            
             var debuggerMock = new Mock<IDebugger>();
             debuggerMock.Setup(x => x.IsEnabled).Returns(true);
+            debuggerMock.Setup(x => x.GetSession()).Returns(debugSessionMock.Object);
             
-            Action act = () => CompileClientScript(
+            var code = CompileClientScript(
                 ExplicitImportsBehavior.Development, 
-                out _, 
+                out var shouldCompile, 
                 debuggerMock.Object);
             
-            act.Should().Throw<CompilerException>()
-                .WithMessage("*" + LibraryModuleName + " принадлежит пакету " + LibraryShortName + "*", 
-                    "в режиме Development с включенным отладчиком должна быть ошибка");
+            shouldCompile.Should().BeTrue();
+            _messages.Should().HaveCount(1, "должно быть одно предупреждение")
+                .And.Contain(x => 
+                    x.Contains(LibraryModuleName, StringComparison.InvariantCultureIgnoreCase) &&
+                    x.Contains(LibraryShortName, StringComparison.InvariantCultureIgnoreCase),
+                    "в режиме Development с включенным отладчиком должно быть предупреждение");
         }
 
         [Fact]
@@ -209,10 +216,10 @@ namespace OneScript.Core.Tests
                     .Create()
                     .SetupConfiguration(p =>
                     {
-                        p.Add(() => new Dictionary<string, string>
+                        p.Add(new DictionaryConfigProvider(new Dictionary<string, string>
                         {
                             { "lang.explicitImports", configValue }
-                        });
+                        }));
                     })
                     .SetDefaultOptions();
 
@@ -305,6 +312,27 @@ namespace OneScript.Core.Tests
                 }
                 
                 return null;
+            }
+        }
+        
+        private class DictionaryConfigProvider : IConfigProvider
+        {
+            private readonly Dictionary<string, string> _config;
+            public string SourceId => "dictionary";
+
+            public DictionaryConfigProvider(Dictionary<string, string> config)
+            {
+                _config = config;
+            }
+
+            public IReadOnlyDictionary<string, string> Load()
+            {
+                return _config;
+            }
+
+            public string ResolveRelativePath(string path)
+            {
+                return path;
             }
         }
     }

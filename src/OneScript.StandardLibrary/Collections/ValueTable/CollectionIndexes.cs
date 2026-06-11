@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 This Source Code Form is subject to the terms of the 
 Mozilla Public License, v.2.0. If a copy of the MPL 
 was not distributed with this file, You can obtain one 
@@ -32,7 +32,6 @@ namespace OneScript.StandardLibrary.Collections.ValueTable
         public CollectionIndex Add(string columns)
         {
             var newIndex = new CollectionIndex(_owner, BuildFieldList(_owner, columns));
-            newIndex.Rebuild();
             _indexes.Add(newIndex);
             return newIndex;
         }
@@ -40,18 +39,23 @@ namespace OneScript.StandardLibrary.Collections.ValueTable
         [ContextMethod("Количество", "Count")]
         public override int Count()
         {
-            return _indexes.Count();
+            return _indexes.Count;
         }
 
         [ContextMethod("Удалить", "Delete")]
         public void Delete(IValue index)
         {
-            _indexes.Remove(GetIndex(index));
+            var idx = GetIndex(index);
+            idx.ExcludeFields();
+            _indexes.Remove(idx);
         }
 
         [ContextMethod("Очистить", "Clear")]
         public void Clear()
         {
+            foreach (var idx in _indexes)
+                idx.ExcludeFields();
+
             _indexes.Clear();
         }
 
@@ -130,21 +134,42 @@ namespace OneScript.StandardLibrary.Collections.ValueTable
             return _indexes.FirstOrDefault(index => index.CanBeUsedFor(searchFields));
         }
 
-        private static IList<IValue> BuildFieldList(IIndexCollectionSource source, string fieldList)
+        /// <summary>
+        /// Индекс, все поля которого содержатся в <paramref name="searchColumns"/>,
+        /// с максимальным числом полей (более узкий состав ключа — предпочтительнее).
+        /// </summary>
+        public CollectionIndex FindBestContainedIndex(IEnumerable<IValue> searchColumns)
+        {
+            CollectionIndex best = null;
+            var bestFieldCount = -1;
+            foreach (var index in _indexes)
+            {
+                if (!index.CanBeUsedFor(searchColumns))
+                    continue;
+
+                var n = index.Count();
+                if (n > bestFieldCount)
+                {
+                    bestFieldCount = n;
+                    best = index;
+                }
+            }
+
+            return best;
+        }
+
+        private static List<IValue> BuildFieldList(IIndexCollectionSource source, string fieldList)
         {
             var fields = new List<IValue>();
-            var fieldNames = fieldList.Split(',');
+            if (string.IsNullOrEmpty(fieldList))
+                return fields;
+
+            var fieldNames = fieldList.Split(',', System.StringSplitOptions.RemoveEmptyEntries);
             foreach (var fieldName in fieldNames)
             {
-                if (!string.IsNullOrWhiteSpace(fieldName))
-                {
-                    var field = source.GetField(fieldName.Trim());
-                    if (field == null)
-                    {
-                        throw ColumnException.WrongColumnName(fieldName);
-                    }
-                    fields.Add(field);
-                }
+                var name = fieldName.Trim();
+                var field = source.GetField(name) ?? throw ColumnException.WrongColumnName(fieldName);
+                fields.Add(field);
             }
 
             return fields;

@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 This Source Code Form is subject to the terms of the
 Mozilla Public License, v.2.0. If a copy of the MPL
 was not distributed with this file, You can obtain one
@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using OneScript.Contexts;
 using OneScript.Native.Extensions;
+using OneScript.StandardLibrary;
 using ScriptEngine.Hosting;
 using ScriptEngine.Machine;
 
@@ -25,7 +26,7 @@ namespace ScriptEngine.HostedScript.Extensions
                     FilePath = configFile,
                     Required = required
                 };
-                providers.Add(reader.GetProvider());
+                providers.Add(reader);
             }
 
             return providers;
@@ -60,17 +61,15 @@ namespace ScriptEngine.HostedScript.Extensions
         
         public static ConfigurationProviders UseEnvironmentVariableConfig(this ConfigurationProviders providers, string varName)
         {
-            var env = System.Environment.GetEnvironmentVariable(varName);
-            if(env == null)
-                return providers;
-
-            var reader = new FormatStringConfigProvider
-            {
-                ValuesString = env
-            };
-            
-            providers.Add(reader.GetProvider());
+            var reader = new EnvironmentVariableConfigProvider(varName);
+            providers.Add(reader);
             return providers;
+        }
+
+        public static IEngineBuilder UseDefaultHosting(this IEngineBuilder b)
+        {
+            return b.UseFileSystemLibraries()
+                    .UseBinaryDataOptions();
         }
         
         public static IEngineBuilder UseFileSystemLibraries(this IEngineBuilder b)

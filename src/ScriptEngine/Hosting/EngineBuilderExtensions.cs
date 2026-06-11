@@ -73,12 +73,13 @@ namespace ScriptEngine.Hosting
                 return new PreprocessorHandlers(providers);
             });
             
+            services.RegisterSingleton<EngineConfiguration>();
             services.Register<KeyValueConfig>(sp =>
             {
-                var providers = sp.Resolve<ConfigurationProviders>();
-                return providers.CreateConfig();
+                var holder = sp.Resolve<EngineConfiguration>();
+                return holder.GetConfig();
             });
-            
+
             services.Register<ScriptingEngine>();
 
             return builder;

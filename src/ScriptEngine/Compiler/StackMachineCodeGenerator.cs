@@ -41,6 +41,11 @@ namespace ScriptEngine.Compiler
         
         private readonly List<ForwardedMethodDecl> _forwardedMethods = new List<ForwardedMethodDecl>();
         private readonly Stack<NestedLoopInfo> _nestedLoops = new Stack<NestedLoopInfo>();
+        private readonly Dictionary<string, LabelInfo> _labels = new Dictionary<string, LabelInfo>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<PendingGoto> _pendingGotos = new List<PendingGoto>();
+        private readonly List<(BlockType type, int id)> _blockStack = new List<(BlockType type, int id)>();
+        private int _tryNestingCount;
+        private int _blockIdCounter;
 
         private IBslProcess _compilerProcess;
         
@@ -125,7 +130,7 @@ namespace ScriptEngine.Compiler
 
         private void CheckForwardedDeclarations()
         {
-            if (_forwardedMethods.Count > 0)
+            if (_forwardedMethods.Count != 0)
             {
                 foreach (var item in _forwardedMethods)
                 {
@@ -197,6 +202,7 @@ namespace ScriptEngine.Compiler
             if (child.Children.Count == 0)
                 return;
 
+            ResetLabelState();
             var entry = _module.Code.Count;
             var localCtx = new SymbolScope();
             _ctx.PushScope(localCtx, ScopeBindingDescriptor.ThisScope());
@@ -211,6 +217,7 @@ namespace ScriptEngine.Compiler
                 throw;
             }
 
+            FinalizePendingGotos();
             _ctx.PopScope();
             
             var topIdx = _ctx.ScopeCount - 1;
@@ -249,12 +256,118 @@ namespace ScriptEngine.Compiler
         
         protected override void VisitGotoNode(NonTerminalNode node)
         {
-            throw new NotSupportedException();
+            var labelNode = (LabelNode)node.Children[0];
+            var labelName = labelNode.LabelName;
+
+            if (_labels.TryGetValue(labelName, out var labelInfo) && labelInfo.codeIndex != DUMMY_ADDRESS)
+            {
+                // Обратный переход, метка уже определена
+                var currentStack = SnapshotBlockStack();
+                if (!IsValidGotoTarget(currentStack, labelInfo.blockStack))
+                {
+                    AddError(CompilerErrors.InvalidGotoTarget(labelName), node.Location);
+                    return;
+                }
+
+                GenerateLoopCleanup(currentStack, labelInfo.blockStack);
+
+                var tryDiff = _tryNestingCount - labelInfo.tryNesting;
+                if (tryDiff > 0)
+                    AddCommand(OperationCode.ExitTry, tryDiff);
+
+                AddCommand(OperationCode.Jmp, labelInfo.codeIndex);
+            }
+            else
+            {
+                // Прямой переход, метка еще не определена
+                if (!_labels.ContainsKey(labelName))
+                    _labels[labelName] = new LabelInfo();
+
+                var currentStack = SnapshotBlockStack();
+
+                // Резервируем слоты очистки для циклов (от внутреннего к внешнему)
+                var cleanupSlots = new List<(int commandIndex, BlockType loopType, int blockId)>();
+                for (int i = currentStack.Count - 1; i >= 0; i--)
+                {
+                    var block = currentStack[i];
+                    if (block.type == BlockType.ForEach || block.type == BlockType.For)
+                    {
+                        var idx = AddCommand(OperationCode.Nop);
+                        cleanupSlots.Add((idx, block.type, block.id));
+                    }
+                }
+
+                var exitTryIndex = _tryNestingCount > 0
+                    ? AddCommand(OperationCode.ExitTry, 0)
+                    : -1;
+                var jmpIndex = AddCommand(OperationCode.Jmp, DUMMY_ADDRESS);
+
+                _pendingGotos.Add(new PendingGoto
+                {
+                    commandIndex = jmpIndex,
+                    exitTryIndex = exitTryIndex,
+                    labelName = labelName,
+                    blockStack = currentStack,
+                    loopCleanupSlots = cleanupSlots,
+                    location = node.Location,
+                    tryNesting = _tryNestingCount
+                });
+            }
         }
 
         protected override void VisitLabelNode(LabelNode node)
         {
-            throw new NotSupportedException();
+            var labelName = node.LabelName;
+
+            if (_labels.TryGetValue(labelName, out var existing) && existing.codeIndex != DUMMY_ADDRESS)
+            {
+                AddError(CompilerErrors.DuplicateLabelDefinition(labelName), node.Location);
+                return;
+            }
+
+            var labelInfo = existing ?? new LabelInfo();
+            labelInfo.codeIndex = _module.Code.Count;
+            labelInfo.blockStack = SnapshotBlockStack();
+            labelInfo.tryNesting = _tryNestingCount;
+            _labels[labelName] = labelInfo;
+
+            // Разрешаем отложенные прямые переходы, указывающие на эту метку
+            for (int i = _pendingGotos.Count - 1; i >= 0; i--)
+            {
+                var pending = _pendingGotos[i];
+                if (!string.Equals(pending.labelName, labelName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (!IsValidGotoTarget(pending.blockStack, labelInfo.blockStack))
+                {
+                    AddError(CompilerErrors.InvalidGotoTarget(labelName), pending.location);
+                }
+                else
+                {
+                    // Заполняем слоты очистки циклов
+                    var exitedBlockIds = new HashSet<int>();
+                    for (int j = labelInfo.blockStack.Count; j < pending.blockStack.Count; j++)
+                        exitedBlockIds.Add(pending.blockStack[j].id);
+
+                    foreach (var slot in pending.loopCleanupSlots)
+                    {
+                        if (exitedBlockIds.Contains(slot.blockId))
+                        {
+                            if (slot.loopType == BlockType.ForEach)
+                                CorrectCommand(slot.commandIndex, OperationCode.StopIterator, 0);
+                            else if (slot.loopType == BlockType.For)
+                                CorrectCommand(slot.commandIndex, OperationCode.PopTmp, 1);
+                        }
+                    }
+
+                    var tryDiff = pending.tryNesting - labelInfo.tryNesting;
+                    if (tryDiff > 0 && pending.exitTryIndex != -1)
+                        CorrectCommandArgument(pending.exitTryIndex, tryDiff);
+                    CorrectCommandArgument(pending.commandIndex, labelInfo.codeIndex);
+                }
+
+                _pendingGotos.RemoveAt(i);
+            }
         }
 
         protected override void VisitMethod(MethodNode methodNode)
@@ -332,23 +445,25 @@ namespace ScriptEngine.Compiler
 
         protected override void VisitMethodBody(MethodNode methodNode)
         {
+            ResetLabelState();
             var codeStart = _module.Code.Count;
-            
+
             foreach (var variableDefinition in methodNode.VariableDefinitions())
             {
                 VisitMethodVariable(methodNode, variableDefinition);
             }
 
             VisitCodeBlock(methodNode.MethodBody);
-            
+
             if (methodNode.Signature.IsFunction)
             {
                 // неявный возврат Undefined
                 AddCommand(OperationCode.PushUndef);
             }
-            
+
             var codeEnd = _module.Code.Count;
-            
+            FinalizePendingGotos();
+
             VisitBlockEnd(methodNode.EndLocation); // debug last line num
             
             AddCommand(OperationCode.Return);
@@ -383,14 +498,17 @@ namespace ScriptEngine.Compiler
             var loopRecord = NestedLoopInfo.New();
             loopRecord.startPoint = conditionIndex;
             _nestedLoops.Push(loopRecord);
+            PushBlock(BlockType.While);
             base.VisitExpression(node.Children[0]);
             var jumpFalseIndex = AddCommand(OperationCode.JmpFalse, DUMMY_ADDRESS);
-            
+
             VisitCodeBlock(node.Children[1]);
+            VisitBlockEnd(node.EndLocation);
 
             AddCommand(OperationCode.Jmp, conditionIndex);
             var endLoop = AddCommand(OperationCode.Nop);
             CorrectCommandArgument(jumpFalseIndex, endLoop);
+            PopBlock();
             CorrectBreakStatements(_nestedLoops.Pop(), endLoop);
         }
 
@@ -408,15 +526,16 @@ namespace ScriptEngine.Compiler
             var loopRecord = NestedLoopInfo.New();
             loopRecord.startPoint = loopBegin;
             _nestedLoops.Push(loopRecord);
-            
+            PushBlock(BlockType.ForEach);
+
             VisitIteratorLoopBody(node.LoopBody);
-            
-            AddCommand(OperationCode.Jmp, loopBegin);
-            
             VisitBlockEnd(node.EndLocation);
-            
+
+            AddCommand(OperationCode.Jmp, loopBegin);
+
             var indexLoopEnd = AddCommand(OperationCode.StopIterator);
             CorrectCommandArgument(condition, indexLoopEnd);
+            PopBlock();
             CorrectBreakStatements(_nestedLoops.Pop(), indexLoopEnd);
         }
 
@@ -447,6 +566,7 @@ namespace ScriptEngine.Compiler
             var loopRecord = NestedLoopInfo.New();
             loopRecord.startPoint = indexLoopBegin;
             _nestedLoops.Push(loopRecord);
+            PushBlock(BlockType.For);
 
             VisitCodeBlock(node.LoopBody);
             VisitBlockEnd(node.EndLocation);
@@ -456,6 +576,7 @@ namespace ScriptEngine.Compiler
 
             var indexLoopEnd = AddCommand(OperationCode.PopTmp, 1);
             CorrectCommandArgument(conditionIndex, indexLoopEnd);
+            PopBlock();
             CorrectBreakStatements(_nestedLoops.Pop(), indexLoopEnd);
         }
 
@@ -476,7 +597,7 @@ namespace ScriptEngine.Compiler
 
         protected override void VisitReturnNode(BslSyntaxNode node)
         {
-            if (node.Children.Count > 0)
+            if (node.Children.Count != 0)
             {
                 VisitExpression(node.Children[0]);
                 AddCommand(OperationCode.MakeRawValue);
@@ -488,7 +609,7 @@ namespace ScriptEngine.Compiler
         protected override void VisitRaiseNode(BslSyntaxNode node)
         {
             int arg = -1;
-            if (node.Children.Any())
+            if (node.Children.Count != 0)
             {
                 VisitExpression(node.Children[0]);
                 arg = 0;
@@ -504,11 +625,13 @@ namespace ScriptEngine.Compiler
             
             var jumpFalseIndex = AddCommand(OperationCode.JmpFalse, DUMMY_ADDRESS);
 
+            PushBlock(BlockType.If);
             VisitIfTruePart(node.TruePart);
+            PopBlock();
             exitIndices.Add(AddCommand(OperationCode.Jmp, DUMMY_ADDRESS));
 
             bool hasAlternativeBranches = false;
-            
+
             foreach (var alternative in node.GetAlternatives())
             {
                 CorrectCommandArgument(jumpFalseIndex, _module.Code.Count);
@@ -517,7 +640,9 @@ namespace ScriptEngine.Compiler
                     AddLineNumber(alternative.Location.LineNumber);
                     VisitIfExpression(elif.Expression);
                     jumpFalseIndex = AddCommand(OperationCode.JmpFalse, DUMMY_ADDRESS);
+                    PushBlock(BlockType.ElseIf);
                     VisitIfTruePart(elif.TruePart);
+                    PopBlock();
                     exitIndices.Add(AddCommand(OperationCode.Jmp, DUMMY_ADDRESS));
                 }
                 else
@@ -525,7 +650,9 @@ namespace ScriptEngine.Compiler
                     hasAlternativeBranches = true;
                     CorrectCommandArgument(jumpFalseIndex, _module.Code.Count);
                     AddLineNumber(alternative.Location.LineNumber, CodeGenerationFlags.CodeStatistics);
+                    PushBlock(BlockType.Else);
                     VisitCodeBlock(alternative);
+                    PopBlock();
                 }
             }
 
@@ -727,24 +854,17 @@ namespace ScriptEngine.Compiler
             
             PushCallArguments(args);
             
-            var cDef = new ConstDefinition();
-            cDef.Type = DataType.String;
-            cDef.Presentation = name.GetIdentifier();
-            int lastIdentifierConst = GetConstNumber(cDef);
+            int lastIdentifierIndex = GetIdentNumber(name.GetIdentifier());
             
             if (asFunction)
-                AddCommand(OperationCode.ResolveMethodFunc, lastIdentifierConst);
+                AddCommand(OperationCode.ResolveMethodFunc, lastIdentifierIndex);
             else
-                AddCommand(OperationCode.ResolveMethodProc, lastIdentifierConst);
+                AddCommand(OperationCode.ResolveMethodProc, lastIdentifierIndex);
         }
         
         private void ResolveProperty(string identifier)
         {
-            var cDef = new ConstDefinition();
-            cDef.Type = DataType.String;
-            cDef.Presentation = identifier;
-            var identifierConstIndex = GetConstNumber(cDef);
-            AddCommand(OperationCode.ResolveProp, identifierConstIndex);
+            AddCommand(OperationCode.ResolveProp, GetIdentNumber(identifier));
         }
 
         private int PushVariable(TerminalNode node)
@@ -857,16 +977,18 @@ namespace ScriptEngine.Compiler
                 if (asFunction)
                     AddCommand(OperationCode.CallFunc, GetMethodRefNumber(methBinding));
                 else
-                    AddCommand(OperationCode.CallProc, GetMethodRefNumber(methBinding)); 
+                    AddCommand(OperationCode.CallProc, GetMethodRefNumber(methBinding));
             }
             else
             {
                 // can be defined later
-                var forwarded = new ForwardedMethodDecl();
-                forwarded.identifier = identifier;
-                forwarded.asFunction = asFunction;
-                forwarded.location = identifierNode.Location;
-                forwarded.factArguments = argList;
+                var forwarded = new ForwardedMethodDecl
+                {
+                    identifier = identifier,
+                    asFunction = asFunction,
+                    location = identifierNode.Location,
+                    factArguments = argList
+                };
 
                 PushCallArguments(call.ArgumentList);
                 
@@ -884,17 +1006,17 @@ namespace ScriptEngine.Compiler
 
         private void PushArgumentsList(BslSyntaxNode argList)
         {
-            for (int i = 0; i < argList.Children.Count; i++)
+            var arguments = argList.Children;
+            for (int i = 0; i < arguments.Count; i++)
             {
-                var passedArg = argList.Children[i];
-                VisitCallArgument(passedArg);
+                VisitCallArgument(arguments[i]);
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void VisitCallArgument(BslSyntaxNode passedArg)
         {
-            if (passedArg.Children.Count > 0)
+            if (passedArg.Children.Count != 0)
             {
                 VisitExpression(passedArg.Children[0]);
             }
@@ -970,8 +1092,17 @@ namespace ScriptEngine.Compiler
         protected override void VisitTryBlock(CodeBatchNode node)
         {
             PushTryNesting();
+            PushBlock(BlockType.Try);
             base.VisitTryBlock(node);
+            PopBlock();
             PopTryNesting();
+        }
+
+        protected override void VisitExceptBlock(CodeBatchNode node)
+        {
+            PushBlock(BlockType.Except);
+            base.VisitExceptBlock(node);
+            PopBlock();
         }
 
         protected override void VisitExecuteStatement(BslSyntaxNode node)
@@ -1055,7 +1186,7 @@ namespace ScriptEngine.Compiler
             var argsPassed = node.ConstructorArguments.Children.Count;
             if (argsPassed == 1)
             {
-                PushArgumentsList(node.ConstructorArguments);
+                VisitCallArgument(node.ConstructorArguments.Children[0]); ;
             }
             else if (argsPassed > 1)
             {
@@ -1067,21 +1198,17 @@ namespace ScriptEngine.Compiler
         
         private void MakeNewObjectStatic(NewObjectNode node)
         {
-            var cDef = new ConstDefinition()
-            {
-                Type = DataType.String,
-                Presentation = node.TypeNameNode.GetIdentifier()
-            };
-            AddCommand(OperationCode.PushConst, GetConstNumber(cDef));
-
-            var callArgs = 0;
             if (node.ConstructorArguments != default)
             {
-                PushArgumentsList(node.ConstructorArguments);
-                callArgs = node.ConstructorArguments.Children.Count;
+                PushCallArguments(node.ConstructorArguments);
+            }
+            else
+            {
+                AddCommand(OperationCode.ArgNum, 0);
             }
 
-            AddCommand(OperationCode.NewInstance, callArgs);
+            var idNum = GetIdentNumber(node.TypeNameNode.GetIdentifier());
+            AddCommand(OperationCode.NewInstance, idNum);
         }
 
         private void ExitTryBlocks()
@@ -1093,7 +1220,7 @@ namespace ScriptEngine.Compiler
 
         private void PushTryNesting()
         {
-            if (_nestedLoops.Count > 0)
+            if (_nestedLoops.Count != 0)
             {
                 _nestedLoops.Peek().tryNesting++;
             }
@@ -1101,12 +1228,79 @@ namespace ScriptEngine.Compiler
         
         private void PopTryNesting()
         {
-            if (_nestedLoops.Count > 0)
+            if (_nestedLoops.Count != 0)
             {
                 _nestedLoops.Peek().tryNesting--;
             }
         }
-        
+
+        private void PushBlock(BlockType blockType)
+        {
+            _blockStack.Add((blockType, _blockIdCounter++));
+            if (blockType == BlockType.Try)
+                _tryNestingCount++;
+        }
+
+        private void PopBlock()
+        {
+            var last = _blockStack[_blockStack.Count - 1];
+            _blockStack.RemoveAt(_blockStack.Count - 1);
+            if (last.type == BlockType.Try)
+                _tryNestingCount--;
+        }
+
+        private List<(BlockType type, int id)> SnapshotBlockStack()
+        {
+            return new List<(BlockType type, int id)>(_blockStack);
+        }
+
+        private static bool IsValidGotoTarget(List<(BlockType type, int id)> gotoStack, List<(BlockType type, int id)> labelStack)
+        {
+            if (labelStack.Count > gotoStack.Count)
+                return false;
+            for (int i = 0; i < labelStack.Count; i++)
+            {
+                if (labelStack[i].type != gotoStack[i].type || labelStack[i].id != gotoStack[i].id)
+                    return false;
+            }
+            return true;
+        }
+
+        private void ResetLabelState()
+        {
+            _labels.Clear();
+            _pendingGotos.Clear();
+            _blockStack.Clear();
+            _tryNestingCount = 0;
+            _blockIdCounter = 0;
+        }
+
+        private void GenerateLoopCleanup(List<(BlockType type, int id)> gotoStack, List<(BlockType type, int id)> labelStack)
+        {
+            // Генерация очистки стека от внутреннего цикла к внешнему при выходе через Перейти
+            for (int i = gotoStack.Count - 1; i >= labelStack.Count; i--)
+            {
+                if (gotoStack[i].type == BlockType.ForEach)
+                    AddCommand(OperationCode.StopIterator);
+                else if (gotoStack[i].type == BlockType.For)
+                    AddCommand(OperationCode.PopTmp, 1);
+            }
+        }
+
+        private void CorrectCommand(int index, OperationCode code, int argument)
+        {
+            _module.Code[index] = new Command { Code = code, Argument = argument };
+        }
+
+        private void FinalizePendingGotos()
+        {
+            foreach (var pending in _pendingGotos)
+            {
+                AddError(CompilerErrors.UndefinedLabel(pending.labelName), pending.location);
+            }
+            _pendingGotos.Clear();
+        }
+
         private void CorrectCommandArgument(int index, int newArgument)
         {
             var cmd = _module.Code[index];
@@ -1237,23 +1431,35 @@ namespace ScriptEngine.Compiler
 
         private BslAnnotationParameter MakeAnnotationParameter(AnnotationParameterNode param)
         {
-            BslAnnotationParameter result;
+            var runtimeValue = MakeAnnotationParameterValueConstant(param);
+            return new BslAnnotationParameter(param.Name, runtimeValue);
+        }
+
+        private BslPrimitiveValue MakeAnnotationParameterValueConstant(AnnotationParameterNode param)
+        {
+            if (param.AnnotationNode != null)
+            {
+                var runtimeValue = new BslAnnotationValue(param.AnnotationNode.Name);
+                foreach (var child in param.AnnotationNode.Children)
+                {
+                    var parameter = (AnnotationParameterNode)child;
+                    var parameterValue = MakeAnnotationParameterValueConstant(parameter);
+                    runtimeValue.Parameters.Add(new BslAnnotationParameter(parameter.Name, parameterValue));
+                }
+                return runtimeValue;
+            }
+            else
             if (param.Value.Type != LexemType.NotALexem)
             {
                 var constDef = CreateConstDefinition(param.Value);
                 var constNumber = GetConstNumber(constDef);
                 var runtimeValue = _module.Constants[constNumber];
-                result = new BslAnnotationParameter(param.Name, runtimeValue)
-                {
-                    ConstantValueIndex = constNumber
-                };
+                return runtimeValue;
             }
             else
             {
-                result = new BslAnnotationParameter(param.Name, null);
+                return null;
             }
-
-            return result;
         }
 
         private IEnumerable<BslAnnotationAttribute> GetAnnotations(AnnotatableNode parent)
@@ -1302,7 +1508,7 @@ namespace ScriptEngine.Compiler
             };
             return cDef;
         }
-        
+
         private int GetConstNumber(in ConstDefinition cDef)
         {
             var idx = _constMap.IndexOf(cDef);
@@ -1314,6 +1520,18 @@ namespace ScriptEngine.Compiler
             }
             return idx;
         }
+
+        private int GetIdentNumber(string ident)
+        {
+            var idx = _module.Identifiers.IndexOf(ident);
+            if (idx < 0)
+            {
+                idx = _module.Identifiers.Count;
+                _module.Identifiers.Add(ident);
+            }
+            return idx;
+        }
+
 
         private int GetMethodRefNumber(in SymbolBinding methodBinding)
         {

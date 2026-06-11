@@ -145,6 +145,77 @@ namespace OneScript.Language.Tests
         }
 
         [Fact]
+        public void CheckBuild_Of_AnnotationAsValue()
+        {
+            var code = @"
+            &Аннотация(Параметр = &ТожеАннотация(&СТожеПараметромАннотацией, П2 = &СТожеПараметромАннотацией))
+            Процедура Процедура1() Экспорт
+            КонецПроцедуры";
+
+            var treeValidator = ParseModuleAndGetValidator(code);
+
+            treeValidator.Is(NodeKind.MethodsSection);
+
+            var methodNode = treeValidator.NextChild();
+            methodNode.Is(NodeKind.Method);
+            var annotationNode = methodNode.NextChild();
+            annotationNode.Is(NodeKind.Annotation);
+            var annotationParameter = annotationNode.NextChild();
+            annotationParameter.Is(NodeKind.AnnotationParameter);
+
+            annotationParameter
+                .NextChildIs(NodeKind.AnnotationParameterName)
+                .NextChildIs(NodeKind.Annotation);
+        }
+
+        [Fact]
+        public void Check_AnnotationNotAllowed_InList()
+        {
+            var code = @"
+            &Аннотация
+            Перем Пер1, &Анн Пер2;";
+
+            CatchParsingError(code, err => err.First().ErrorId.Should().Be("AnnotationNotAllowed"));
+        }
+
+        [Fact]
+        public void Check_AnnotationNotAllowed_InMethod()
+        {
+            var code = @"
+            Процедура Процедура1()
+                &Аннотация
+                Возврат
+            КонецПроцедуры";
+
+            CatchParsingError(code, err => err.Single().ErrorId.Should().Be("AnnotationNotAllowed"));
+        }
+
+        [Fact]
+        public void Check_AnnotationNotAllowed_BeforeMethodsEnd()
+        {
+            var code = @"
+            Процедура Процедура1()
+                Ч = 0;
+                &Аннотация
+            КонецПроцедуры";
+
+            CatchParsingError(code, err => err.Single().ErrorId.Should().Be("AnnotationNotAllowed"));
+        }
+
+        [Fact]
+        public void Check_AnnotationNotAllowed_InModuleBody()
+        {
+            var code = @"
+            Процедура Процедура1()
+            КонецПроцедуры
+            &Аннотация
+            Ч = 0";
+
+            CatchParsingError(code, err => err.Single().ErrorId.Should().Be("AnnotationNotAllowed"));
+        }
+
+
+        [Fact]
         public void Check_Method_Parameters()
         {
             var code = @"
@@ -1221,7 +1292,36 @@ namespace OneScript.Language.Tests
 
             CatchParsingError(code);
         }
-        
+
+        [Fact]
+        public void Check_Question_Operator_Delimiters()
+        {
+            var code = @"Ф = ?(Истина? 1 ; 2);";
+
+            CatchParsingError(code);
+        }
+
+        [Fact]
+        public void Check_Method_Definition_Delimiters()
+        {
+            var code = @"Процедура Проц1(арг1 арг2)
+                КонецПроцедуры";
+
+            CatchParsingError(code);
+        }
+
+        [Fact]
+        public void Check_Method_Call_Delimiters()
+        {
+            var code = @"Процедура Проц1(арг1, арг2)
+                КонецПроцедуры
+                Проц1(""1"" 2)";
+
+            CatchParsingError(code);
+        }
+
+
+
         [Fact]
         public void TestLocalExportVar()
         {
@@ -1230,12 +1330,7 @@ namespace OneScript.Language.Tests
 	                Перем Переменная Экспорт;
                 КонецПроцедуры";
 
-            CatchParsingError(code, err =>
-            {
-                var errors = err.ToArray();
-                errors.Should().HaveCount(1);
-                errors[0].Description.Should().Contain("Локальная переменная не может быть экспортирована");
-            });
+            CatchParsingError(code, err => err.First().ErrorId.Should().Be("ExportedLocalVar"));
         }
 
         [Fact]
@@ -1515,6 +1610,22 @@ namespace OneScript.Language.Tests
                 .NextChildIs(NodeKind.Identifier)
                 .ChildItself().Value.Should().Be("Асинх");
         }
+
+        [Fact]
+        public void Throws_When_Error_In_Module_Body()
+        {
+            var code = @"Function F()
+                            Return 0
+                        EndFunction
+                        EndFunction";
+
+            var parser = PrepareParser(code);
+            parser.ParseStatefulModule();
+
+            parser.Errors.Should().NotBeEmpty("Expression syntax error");
+            parser.Errors.First().ErrorId.Should().Be("UnexpectedKeyword");
+        }
+
 
         private static void CatchParsingError(string code)
         {

@@ -1,4 +1,4 @@
-﻿/*----------------------------------------------------------
+/*----------------------------------------------------------
 This Source Code Form is subject to the terms of the
 Mozilla Public License, v.2.0. If a copy of the MPL
 was not distributed with this file, You can obtain one
@@ -6,6 +6,7 @@ at http://mozilla.org/MPL/2.0/.
 ----------------------------------------------------------*/
 
 using OneScript.StandardLibrary;
+using OneScript.StandardLibrary.Binary;
 using ScriptEngine.HostedScript;
 using ScriptEngine.Hosting;
 using ScriptEngine.HostedScript.Extensions;
@@ -21,8 +22,8 @@ namespace oscript
                 .SetupConfiguration(p =>
                 {
                     p.UseSystemConfigFile()
-                        .UseEnvironmentVariableConfig("OSCRIPT_CONFIG")
-                        .UseEntrypointConfigFile(codePath);
+                        .UseEntrypointConfigFile(codePath)
+                        .UseEnvironmentVariableConfig("OSCRIPT_CONFIG");
                 });
 
             BuildUpWithIoC(builder);
@@ -31,7 +32,7 @@ namespace oscript
                 {
                     env.AddStandardLibrary()
                      .AddWebServer()
-                     .UseTemplateFactory(new DefaultTemplatesFactory());
+                     .UseTemplateFactory(new DefaultTemplatesFactory(env.Services.Resolve<IBinaryDataMemoryLimit>()));
                 });
 
             return builder;
@@ -49,7 +50,7 @@ namespace oscript
         {
             builder.SetDefaultOptions()
                 .UseImports()
-                .UseFileSystemLibraries()
+                .UseDefaultHosting()
                 .UseNativeRuntime()
                 .UseEventHandlers();
         }
